@@ -269,6 +269,167 @@ Test suite covers:
 
 **Browser cascade economics:** Layer 1 (trafilatura) is free and handles most static content (Wikipedia, article pages). Layer 2b (a11y) handles most interactive content including most canvas apps because aria-labelled toolbars + coordinate drag actions cover them. Layer 3 (vision) fires only when the page has no DOM grip at all and the goal requires acting on pixel content.
 
+## Example: End-to-End Session Trace
+
+Session `s9-347199a2` — a real run captured in [replays/replay_s9-347199a2.html](replays/replay_s9-347199a2.html).
+
+### 1. User Goal
+
+> Compare 5 AI coding tools by free plan and paid plan in OLLAMA — https://ollama.com/library
+
+### 2. Planner DAG
+
+The Planner seeded an initial graph, then three recovery Planners fired in response to failed browser nodes, ultimately producing 30 nodes total:
+
+```
+n:1  planner
+  ├─ n:2  browser (ollama.com/library)  →  n:3 url_extractor
+  │         └─ n:4 browser (failed)
+  │         └─ n:5 browser (llama3, extract)
+  │         └─ n:6 browser (failed)
+  │         └─ n:7 browser (a11y, 9 turns)
+  │         └─ n:8 browser (failed)
+  ├─ n:11 planner (recovery) ──► n:16–n:20 browser ×5 → n:21 distiller → n:22 formatter
+  ├─ n:12 planner (recovery) → n:14 distiller → n:15 formatter
+  ├─ n:13 planner (recovery) ──► n:23–n:27 browser ×5 → n:28 distiller → n:29 formatter
+  └─  n:30, n:31, n:32  critic ×3
+```
+
+### 3. Browser Path Chosen
+
+Each browser node independently ran the cascade and stopped at the first sufficient layer:
+
+| Node | URL | Cascade layer | Turns |
+|---|---|---|---|
+| n:2 | ollama.com/library | **extract** | 0 |
+| n:5 | ollama.com/library/llama3 | **extract** | 0 |
+| n:7 | ollama.com/library/lama | **a11y** | 9 |
+| n:16 | ollama.com/library/qwen2.5-coder | **extract** | 0 |
+| n:17 | ollama.com/library/codellama | **extract** | 0 |
+| n:18 | ollama.com/library/deepseek-coder | **extract** | 0 |
+| n:19 | ollama.com/library/codegemma | **extract** | 0 |
+| n:20 | ollama.com/library/starcoder2 | **extract** | 0 |
+| n:23–n:27 | same 5 model pages (second batch) | **extract** | 0 each |
+
+Most pages returned useful HTML on bare GET (trafilatura, free, zero LLM calls). `n:7` hit a Terms-of-Service redirect that trafilatura couldn't pierce, escalating to the a11y driver.
+
+### 4. Browser Actions (n:7 — a11y, 9 turns)
+
+Node n:7 was the only node that required interactive driving. The a11y driver ran 9 turns through `ollama.com/library/lama`, navigating to recover from the ToS redirect, ending with `done(success=True)`.
+
+| Node | Turn | Outcome |
+|---|---|---|
+| n:7 | 1 | ok |
+| n:7 | 2 | ok |
+| n:7 | 3 | ok |
+| n:7 | 4 | ok |
+| n:7 | 5 | ok |
+| n:7 | 6 | ok |
+| n:7 | 7 | ok |
+| n:7 | 8 | ok |
+| n:7 | 9 | done(True) |
+
+### 5. Screenshots / Page-State Logs
+
+Per-turn artifacts (legend `.txt` + raw `.png`) are written to `state/sessions/s9-347199a2/browser/` by the a11y and vision drivers. Extract-path nodes (n:2, n:5, n:16–n:20, n:23–n:27) make zero Playwright calls and produce no screenshots — they are free.
+
+To inspect n:7's turn-by-turn state:
+```bash
+ls state/sessions/s9-347199a2/browser/browser_*/a11y/
+# turn_01_legend.txt  turn_01_raw.png
+# turn_02_legend.txt  turn_02_raw.png  ...
+```
+
+### 6. Extracted Data
+
+Each browser node's `output.content` field holds the trafilatura-extracted text. Representative excerpts:
+
+**n:2 — ollama.com/library (library listing)**
+```
+llama3.1 — Llama 3.1 is a new state-of-the-art model from Meta available in 8B, 70B
+  and 405B parameter sizes. 115.9M Pulls  93 Tags  Updated 1 year ago
+deepseek-r1 — DeepSeek-R1 is a family of open reasoning models. 87.6M Pulls  35 Tags
+nomic-embed-text — A high-performing open embedding model with a large token context window.
+```
+
+**n:16 — qwen2.5-coder**
+```
+16.7M Downloads  Updated 1 year ago  |  sizes: 0.5b 1.5b 3b 7b 14b 32b
+qwen2.5-coder:latest  4.7GB · 32K context window · Text
+```
+
+**n:17 — codellama**
+```
+5.7M Downloads  Updated 1 year ago  |  sizes: 7b 13b 34b 70b
+codellama:latest  3.8GB · 16K context window
+Code Llama is a model for generating and discussing code, built on top of Llama 2.
+```
+
+**n:18 — deepseek-coder**
+```
+4.3M Downloads  Updated 2 years ago  |  sizes: 1.3b 6.7b 33b
+Trained from scratch on 87% code and 13% natural language. Pre-trained on 2T tokens.
+```
+
+**n:19 — codegemma**
+```
+3M Downloads  Updated 1 year ago  |  sizes: 2b 7b
+Lightweight models for fill-in-the-middle completion, code generation, mathematical reasoning.
+```
+
+**n:20 — starcoder2**
+```
+2.9M Downloads  Updated 1 year ago  |  sizes: 3b 7b 15b
+16,384-token context window. starcoder2:15b trained on 600+ programming languages, 4T tokens.
+```
+
+### 7. Final Comparison Table
+
+The Distiller extracted structured fields; the Formatter rendered the final answer. Note: Ollama has no free/paid tier — all models are open-source and free to run locally. The Formatter correctly surfaced this instead of hallucinating a pricing structure.
+
+| Model | Primary Use Case |
+|---|---|
+| Qwen2.5-Coder | High-performance coding tasks and reasoning |
+| DeepSeek-Coder | Specialised in code generation and repository-level tasks |
+| CodeLlama | Meta's foundational model for code completion and infilling |
+| StarCoder2 | Optimised for code generation across many programming languages |
+| CodeGemma | Lightweight, efficient model optimised for coding assistance |
+
+### 8. Turn Count and Cost Summary
+
+**30 nodes total — 139.61 s wall clock**
+
+| Node | Skill | Status | Elapsed | Provider | Turns |
+|---|---|---|---|---|---|
+| n:1 | planner | complete | 5.19 s | gemini | — |
+| n:2 | browser | complete | 2.05 s | — | 0 (extract) |
+| n:3 | url_extractor | complete | 0.00 s | — | — |
+| n:4 | browser | **failed** | 0.00 s | — | — |
+| n:5 | browser | complete | 0.64 s | — | 0 (extract) |
+| n:6 | browser | **failed** | 0.00 s | — | — |
+| n:7 | browser | complete | 68.77 s | — | **9 (a11y)** |
+| n:8 | browser | **failed** | 0.00 s | — | — |
+| n:11 | planner (recovery) | complete | 6.20 s | gemini | — |
+| n:12 | planner (recovery) | complete | 3.05 s | gemini | — |
+| n:13 | planner (recovery) | complete | 11.74 s | gemini | — |
+| n:14 | distiller | complete | 2.50 s | gemini | — |
+| n:15 | formatter | complete | 7.64 s | gemini | — |
+| n:16–n:20 | browser ×5 | complete | 0.7–0.9 s each | — | 0 (extract) |
+| n:21 | distiller | complete | 3.01 s | gemini | — |
+| n:22 | formatter | complete | 5.51 s | gemini | — |
+| n:23–n:27 | browser ×5 | complete | 0.65–1.73 s each | — | 0 (extract) |
+| n:28 | distiller | complete | 7.43 s | gemini | — |
+| n:29 | formatter | complete | 1.31 s | gemini | — |
+| n:30–n:32 | critic ×3 | complete | 1.18–3.55 s each | cerebras | — |
+
+**Key observations:**
+- The 10 extract-path browser nodes cost **zero LLM calls** — trafilatura ran locally.
+- n:7 (a11y, 9 turns) accounts for **68.77 s / 49%** of total elapsed time.
+- All LLM calls routed to **gemini** (text) and **cerebras** (critic). No vision provider was needed.
+- Three recovery Planners fired (n:11, n:12, n:13) in response to n:4, n:6, n:8 failing; the orchestrator re-routed and still produced a complete answer.
+
+---
+
 ## Typed Contracts
 
 All inter-layer communication uses Pydantic models defined in `schemas.py`:
